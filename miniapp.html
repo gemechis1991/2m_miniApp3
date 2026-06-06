@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>2M Smart Spare Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f4f4f9; }
+    h1 { color: #333; }
+    .card { background: #fff; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+    .chart-container { position: relative; height: 300px; }
+    .btn { display: inline-block; padding: 10px 15px; margin: 5px; background: #007bff; color: #fff; text-decoration: none; border-radius: 5px; cursor: pointer; }
+    .btn:hover { background: #0056b3; }
+    .qr { width: 120px; height: 120px; margin: 10px; }
+    .flex { display: flex; flex-wrap: wrap; gap: 15px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: center; }
+    th { background: #f0f0f0; }
+    .lowstock { color: red; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>⚙️ 2M Smart Spare Dashboard</h1>
+
+  <!-- Sales Report Section -->
+  <div class="card">
+    <h2>📊 Sales Reports</h2>
+    <div class="chart-container">
+      <canvas id="salesChart"></canvas>
+    </div>
+    <p id="bestSeller">🏆 Best Seller: Loading...</p>
+    <button class="btn" onclick="exportCSV('sales')">⬇️ Export Sales CSV</button>
+    <button class="btn" onclick="exportPDF('sales')">⬇️ Export Sales PDF</button>
+  </div>
+
+  <!-- Consignment Tracking -->
+  <div class="card">
+    <h2>📦 Consignment Tracking</h2>
+    <table id="consignmentTableWrapper">
+      <thead>
+        <tr><th>Supplier</th><th>Product</th><th>Qty</th><th>Price (ETB)</th><th>% Owed</th></tr>
+      </thead>
+      <tbody id="consignmentTable"></tbody>
+    </table>
+    <button class="btn" onclick="exportCSV('consignment')">⬇️ Export Consignment CSV</button>
+    <button class="btn" onclick="exportPDF('consignment')">⬇️ Export Consignment PDF</button>
+  </div>
+
+  <!-- Subscription Tiers -->
+  <div class="card">
+    <h2>💳 Subscription Plans</h2>
+    <div class="flex" id="subscriptionPlans"></div>
+  </div>
+
+  <!-- QR Codes for Cutters -->
+  <div class="card">
+    <h2>🔗 Payment QR Codes</h2>
+    <div class="flex" id="qrCodes">
+      <img class="qr" src="qr_cutter1.png" alt="Cutter 1 QR">
+      <img class="qr" src="qr_cutter2.png" alt="Cutter 2 QR">
+      <img class="qr" src="qr_cutter3.png" alt="Cutter 3 QR">
+    </div>
+  </div>
+
+  <!-- Low Stock Alerts -->
+  <div class="card">
+    <h2>⚠️ Low-Stock Alerts</h2>
+    <ul id="lowStockList"></ul>
+    <button class="btn" onclick="exportCSV('lowstock')">⬇️ Export Low-Stock CSV</button>
+    <button class="btn" onclick="exportPDF('lowstock')">⬇️ Export Low-Stock PDF</button>
+  </div>
+
+  <!-- Per-Staff Payment Tracking -->
+  <div class="card">
+    <h2>👥 Staff Payment Tracking</h2>
+    <table id="paymentLogTableWrapper">
+      <thead>
+        <tr><th>Staff</th><th>Payment Method</th><th>Amount (ETB)</th><th>Date</th></tr>
+      </thead>
+      <tbody id="paymentLogTable"></tbody>
+    </table>
+    <button class="btn" onclick="exportCSV('payments')">⬇️ Export Payments CSV</button>
+    <button class="btn" onclick="exportPDF('payments')">⬇️ Export Payments PDF</button>
+  </div>
+
+  <script>
+    let salesData = [], consignments = [], products = [], payments = [];
+
+    async function loadData() {
+      try {
+        // Sales
+        const salesRes = await fetch('/spare_data/sales.json');
+        salesData = await salesRes.json();
+        const dailyTotals = {};
+        let bestProduct = null, bestQty = 0;
+        salesData.forEach(s => {
+          const day = new Date(s.date).toLocaleDateString('en-US', { weekday: 'short' });
+          dailyTotals[day] = (dailyTotals[day] || 0) + s.total;
+          if (s.qty > bestQty) { bestQty = s.qty; bestProduct = s.product; }
+        });
+        new Chart(document.getElementById("salesChart"), {
+          type: "bar",
+          data: { labels: Object.keys(dailyTotals), datasets: [{ label: "Revenue (ETB)", data: Object.values(dailyTotals), backgroundColor: "rgba(0,123,255,0.6)" }] },
+          options: { responsive: true, plugins: { legend: { display: false } } }
+        });
+        document.getElementById("bestSeller").innerText = `🏆 Best Seller: ${bestProduct} (${bestQty} sold)`;
+
+        // Consignment
+        const consRes = await fetch('/spare_data/consignment.json');
+        consignments = await consRes.json();
+        const consTable = document.getElementById("consignmentTable");
+        consignments.forEach(c => {
+          consTable.innerHTML += `<tr><td>${c.supplier}</td><td>${c.product}</td><td>${c.qty}</td><td>${c.price}</td><td>${c.pct}%</td></tr>`;
+        });
+
+        // Subscriptions
+        const subRes = await fetch('/spare_data/subscriptions.json');
+        const subs = await subRes.json();
+        const subsDiv = document.getElementById("subscriptionPlans");
+        Object.keys(subs).forEach(key => {
+          const plan = subs[key];
+          subsDiv.innerHTML += `<div><h3>${plan.label} - ${plan.price} ETB</h3><p>${plan.desc}</p><a class="btn" href="https://chapa.co/pay/${key}">Pay with Chapa</a></div>`;
+        });
+
+        // Products (low stock)
+        const prodRes = await fetch('/spare_data/products.json');
+        products = await prodRes.json();
+        const lowStockList = document.getElementById("lowStockList");
+        products.forEach(p => {
+          if (p.qty <= 3) {
+            lowStockList.innerHTML += `<li class="lowstock">⚠️ ${p.name} — only ${p.qty} left!</li>`;
+          }
+        });
+
+        // Payments
+        const payRes = await fetch('/spare_data/payment_log.json');
+        payments = await payRes.json();
+        const payTable = document.getElementById("paymentLogTable");
+        payments.forEach(p => {
+          payTable.innerHTML += `<tr><td>${p.staff}</td><td>${p.method}</td><td>${p.amount}</td><td>${new Date(p.date).toLocaleString()}</td></tr>`;
+        });
+
+      } catch (err) { console.error("Error loading data:", err); }
+    }
+
+    // Export helpers
+    function exportCSV(type) {
+      let rows = [];
+      if (type === 'sales') rows = salesData.map(s => [s.product, s.qty, s.total, s.method, s.date]);
+      if (type === 'consignment') rows = consignments.map(c => [c.supplier, c.product, c.qty, c.price, c.pct]);
+      if (type === 'lowstock') rows = products.filter(p => p.qty <= 3).map(p => [p.name, p.qty]);
+      if (type === 'payments') rows = payments.map(p => [p.staff, p.method, p.amount, p.date]);
+
+      let csv = rows.map(r => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url
